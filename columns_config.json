@@ -1,0 +1,75 @@
+[
+  {
+    "id": "company",
+    "name": "Company Name",
+    "type": "text",
+    "required": true,
+    "order": 1
+  },
+  {
+    "id": "title",
+    "name": "Job Title / Role",
+    "type": "text",
+    "required": true,
+    "order": 2
+  },
+  {
+    "id": "location",
+    "name": "Job Location",
+    "type": "text",
+    "required": true,
+    "order": 3
+  },
+  {
+    "id": "application_date",
+    "name": "Application Date",
+    "type": "date",
+    "required": true,
+    "order": 4
+  },
+  {
+    "id": "platform",
+    "name": "Application Platform",
+    "type": "select",
+    "options": [
+      "LinkedIn",
+      "Indeed",
+      "Glassdoor",
+      "Company Website",
+      "Other",
+      "new one"
+    ],
+    "editable": true,
+    "required": true,
+    "order": 5
+  },
+  {
+    "id": "status",
+    "name": "Application Status",
+    "type": "select",
+    "options": [
+      "Applied",
+      "Interviewing",
+      "Offer",
+      "Rejected",
+      "Withdrawn"
+    ],
+    "editable": true,
+    "required": true,
+    "order": 6
+  },
+  {
+    "id": "website_link",
+    "name": "Website Link",
+    "type": "url",
+    "required": false,
+    "order": 7
+  },
+  {
+    "id": "notes",
+    "name": "Notes",
+    "type": "textarea",
+    "required": false,
+    "order": 8
+  }
+]
