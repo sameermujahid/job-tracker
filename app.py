@@ -290,6 +290,15 @@ def send_evening_reminder():
 def index():
     return render_template('job_tracker.html')
 
+@app.route('/health')
+def health_check():
+    """Health check endpoint for Hugging Face Spaces"""
+    return jsonify({
+        'status': 'healthy',
+        'message': 'Job Application Tracker is running',
+        'timestamp': datetime.now().isoformat()
+    })
+
 @app.route('/api/columns', methods=['GET'])
 def get_columns():
     """Get column configuration"""
