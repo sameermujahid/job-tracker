@@ -622,6 +622,14 @@
 
 
                 <div class="content-section">
+                <!-- Vercel Notice -->
+                <div class="alert alert-info" id="vercelNotice" style="display: none;">
+                    <i class="fas fa-info-circle"></i>
+                    <strong>Vercel Deployment Notice:</strong> This is running on Vercel's serverless environment. 
+                    Data will be stored in memory and will be lost when the function restarts. 
+                    For persistent storage, consider using a database or local deployment.
+                </div>
+                
                 <div class="stats-cards" id="statsCards">
                     <div class="stat-card">
                         <div class="stat-number" id="totalApplications">0</div>
@@ -744,6 +752,12 @@
                         <input type="hidden" id="jobId">
                         <div id="jobFormFields">
                             <!-- Dynamic form fields will be loaded here -->
+                            <div class="text-center">
+                                <div class="spinner-border text-primary" role="status">
+                                    <span class="visually-hidden">Loading form...</span>
+                                </div>
+                                <p class="mt-2">Loading form fields...</p>
+                            </div>
                         </div>
                     </form>
                 </div>
@@ -884,6 +898,11 @@
         document.addEventListener('DOMContentLoaded', function() {
             loadColumns();
             setupEventListeners();
+            
+            // Show Vercel notice if running on Vercel
+            if (window.location.hostname.includes('vercel.app')) {
+                document.getElementById('vercelNotice').style.display = 'block';
+            }
         });
 
         function setupEventListeners() {
@@ -923,14 +942,18 @@
         async function loadColumns() {
             try {
                 const response = await fetch('/api/columns');
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
                 columns = await response.json();
+                console.log('Loaded columns:', columns); // Debug log
                 displayTable();
                 populateFiltersFromColumns(); // Initial population from column config
                 await loadJobs();
                 loadStats();
             } catch (error) {
                 console.error('Error loading columns:', error);
-                showToast('Error loading columns', 'error');
+                showToast('Error loading columns: ' + error.message, 'error');
             }
         }
 
@@ -1234,6 +1257,13 @@
         function createJobForm() {
             const formFields = document.getElementById('jobFormFields');
             formFields.innerHTML = '';
+            
+            console.log('Creating job form with columns:', columns); // Debug log
+
+            if (!columns || columns.length === 0) {
+                formFields.innerHTML = '<div class="alert alert-warning">No columns configured. Please add columns first.</div>';
+                return;
+            }
 
             columns.forEach(column => {
                 const fieldDiv = document.createElement('div');
@@ -2122,6 +2152,9 @@
                     console.log('Scheduled jobs:', result.jobs);
                 } else {
                     console.log('Email scheduler is not running');
+                    if (result.message) {
+                        console.log('Message:', result.message);
+                    }
                 }
             } catch (error) {
                 console.error('Error getting scheduler status:', error);
