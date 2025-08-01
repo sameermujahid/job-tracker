@@ -35,52 +35,87 @@ if __name__ == '__main__':
 
 def load_jobs():
     """Load jobs from JSON file"""
-    # Check if we have in-memory storage (Vercel environment)
-    if hasattr(app, 'memory_storage') and 'jobs' in app.memory_storage:
-        return app.memory_storage['jobs']
-    
-    # Try to load from file
+    # Try to load from file first (this is the source of truth)
     if os.path.exists(JOBS_FILE):
         try:
             with open(JOBS_FILE, 'r') as f:
-                return json.load(f)
-        except:
-            return []
+                file_jobs = json.load(f)
+                # Sync with memory storage
+                if hasattr(app, 'memory_storage'):
+                    app.memory_storage['jobs'] = file_jobs
+                return file_jobs
+        except Exception as e:
+            print(f"Error loading jobs from file: {e}")
+    
+    # Check if we have in-memory storage (Vercel environment)
+    if hasattr(app, 'memory_storage') and 'jobs' in app.memory_storage:
+        memory_jobs = app.memory_storage['jobs']
+        # Try to sync memory back to file if possible
+        try:
+            with open(JOBS_FILE, 'w') as f:
+                json.dump(memory_jobs, f, indent=2)
+        except Exception as e:
+            print(f"Could not sync memory to file: {e}")
+        return memory_jobs
+    
     return []
 
 def save_jobs(jobs):
     """Save jobs to JSON file"""
+    # Always update memory storage first
+    if not hasattr(app, 'memory_storage'):
+        app.memory_storage = {'jobs': [], 'columns': []}
+    app.memory_storage['jobs'] = jobs
+    
+    # Try to save to file
     try:
         with open(JOBS_FILE, 'w') as f:
             json.dump(jobs, f, indent=2)
+        print(f"Successfully saved {len(jobs)} jobs to file")
     except OSError as e:
         if "Read-only file system" in str(e):
             # In Vercel, we can't write to files, so we'll use in-memory storage
             print("Warning: Cannot write to file system in Vercel. Using in-memory storage.")
-            # Store in memory for this session (will be lost on restart)
-            if not hasattr(app, 'memory_storage'):
-                app.memory_storage = {'jobs': [], 'columns': []}
-            app.memory_storage['jobs'] = jobs
+            print(f"Stored {len(jobs)} jobs in memory")
         else:
-            raise e
+            print(f"Error saving jobs: {e}")
+            # Still keep in memory as fallback
+    except Exception as e:
+        print(f"Unexpected error saving jobs: {e}")
+        # Keep in memory as fallback
 
 def load_columns():
     """Load column configuration"""
     # Check if we have in-memory storage (Vercel environment)
     if hasattr(app, 'memory_storage') and 'columns' in app.memory_storage:
-        return app.memory_storage['columns']
+        columns = app.memory_storage['columns']
+        if columns:  # If we have columns in memory, return them
+            return columns
     
     # Try to load from file
     if os.path.exists(COLUMNS_FILE):
         try:
             with open(COLUMNS_FILE, 'r') as f:
-                return json.load(f)
-        except:
-            pass
-
-    # Default columns
+                columns = json.load(f)
+                if columns:  # If we successfully loaded columns, return them
+                    return columns
+        except Exception as e:
+            print(f"Error loading columns from file: {e}")
+    
+    # If we get here, we need to create default columns
+    print("Creating default columns...")
     default_columns = get_default_columns()
-    save_columns(default_columns)
+    
+    # Try to save to file, but don't fail if it doesn't work
+    try:
+        save_columns(default_columns)
+    except Exception as e:
+        print(f"Warning: Could not save columns to file: {e}")
+        # Store in memory as fallback
+        if not hasattr(app, 'memory_storage'):
+            app.memory_storage = {'jobs': [], 'columns': []}
+        app.memory_storage['columns'] = default_columns
+    
     return default_columns
 
 def get_default_columns():
@@ -153,6 +188,7 @@ def save_columns(columns):
     try:
         with open(COLUMNS_FILE, 'w') as f:
             json.dump(columns, f, indent=2)
+        print(f"Successfully saved {len(columns)} columns to file")
     except OSError as e:
         if "Read-only file system" in str(e):
             # In Vercel, we can't write to files, so we'll use in-memory storage
@@ -161,8 +197,19 @@ def save_columns(columns):
             if not hasattr(app, 'memory_storage'):
                 app.memory_storage = {'jobs': [], 'columns': []}
             app.memory_storage['columns'] = columns
+            print(f"Stored {len(columns)} columns in memory")
         else:
-            raise e
+            print(f"Error saving columns: {e}")
+            # Still try to store in memory as fallback
+            if not hasattr(app, 'memory_storage'):
+                app.memory_storage = {'jobs': [], 'columns': []}
+            app.memory_storage['columns'] = columns
+    except Exception as e:
+        print(f"Unexpected error saving columns: {e}")
+        # Store in memory as fallback
+        if not hasattr(app, 'memory_storage'):
+            app.memory_storage = {'jobs': [], 'columns': []}
+        app.memory_storage['columns'] = columns
 
 def send_email(subject, body):
     """Send email using Gmail SMTP"""
@@ -435,6 +482,45 @@ def reset_columns():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/columns/init', methods=['POST'])
+def init_columns():
+    """Initialize default columns if none exist"""
+    try:
+        columns = load_columns()
+        if not columns:
+            default_columns = get_default_columns()
+            save_columns(default_columns)
+            return jsonify({'success': True, 'message': 'Default columns initialized', 'columns': default_columns})
+        else:
+            return jsonify({'success': True, 'message': 'Columns already exist', 'columns': columns})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/clear-all-data', methods=['POST'])
+def clear_all_data():
+    """Clear all jobs and reset to clean state"""
+    try:
+        # Clear memory storage
+        if hasattr(app, 'memory_storage'):
+            app.memory_storage['jobs'] = []
+        
+        # Try to remove the jobs file
+        try:
+            if os.path.exists(JOBS_FILE):
+                os.remove(JOBS_FILE)
+                print("Cleared jobs file")
+        except Exception as e:
+            print(f"Could not remove jobs file: {e}")
+        
+        # Ensure columns are preserved
+        columns = load_columns()
+        if not columns:
+            save_columns(get_default_columns())
+        
+        return jsonify({'success': True, 'message': 'All data cleared successfully'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/jobs', methods=['GET'])
 def get_jobs():
     """Get all jobs with optional filtering"""
@@ -537,6 +623,15 @@ def delete_job(job_id):
         jobs = load_jobs()
         jobs = [job for job in jobs if job['id'] != job_id]
         save_jobs(jobs)
+        
+        # If all jobs are deleted, clear the file to prevent ghost jobs
+        if not jobs:
+            try:
+                if os.path.exists(JOBS_FILE):
+                    os.remove(JOBS_FILE)
+                    print("Cleared jobs file since no jobs remain")
+            except Exception as e:
+                print(f"Could not clear jobs file: {e}")
         
         # Ensure columns are preserved even when all jobs are deleted
         columns = load_columns()
@@ -783,6 +878,15 @@ def bulk_delete_jobs():
         
         save_jobs(jobs)
         
+        # If all jobs are deleted, clear the file to prevent ghost jobs
+        if not jobs:
+            try:
+                if os.path.exists(JOBS_FILE):
+                    os.remove(JOBS_FILE)
+                    print("Cleared jobs file since no jobs remain")
+            except Exception as e:
+                print(f"Could not clear jobs file: {e}")
+        
         # Ensure columns are preserved even when all jobs are deleted
         columns = load_columns()
         if not columns:
@@ -892,6 +996,37 @@ def get_scheduler_status():
         return jsonify({
             'scheduler_running': scheduler.running,
             'jobs': job_list
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/environment-info', methods=['GET'])
+def get_environment_info():
+    """Get information about the current environment"""
+    try:
+        # Check if we're in Vercel (read-only file system)
+        is_vercel = False
+        try:
+            # Try to write to a test file
+            test_file = 'test_write.tmp'
+            with open(test_file, 'w') as f:
+                f.write('test')
+            os.remove(test_file)
+        except OSError as e:
+            if "Read-only file system" in str(e):
+                is_vercel = True
+        
+        # Check data storage status
+        jobs_count = len(load_jobs())
+        columns_count = len(load_columns())
+        
+        return jsonify({
+            'is_vercel': is_vercel,
+            'jobs_count': jobs_count,
+            'columns_count': columns_count,
+            'memory_storage_available': hasattr(app, 'memory_storage'),
+            'jobs_file_exists': os.path.exists(JOBS_FILE),
+            'columns_file_exists': os.path.exists(COLUMNS_FILE)
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500

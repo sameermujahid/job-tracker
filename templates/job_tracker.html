@@ -700,6 +700,15 @@
                             <button class="btn btn-outline-warning" onclick="resetColumns()" title="Reset to default columns">
                                 <i class="fas fa-undo"></i> Reset Columns
                             </button>
+                            <button class="btn btn-outline-info" onclick="initColumns()" title="Initialize default columns">
+                                <i class="fas fa-magic"></i> Init Columns
+                            </button>
+                            <button class="btn btn-outline-danger" onclick="clearAllData()" title="Clear all jobs and reset">
+                                <i class="fas fa-trash-alt"></i> Clear All Data
+                            </button>
+                            <button class="btn btn-outline-secondary" onclick="forceRefreshData()" title="Force refresh data from server">
+                                <i class="fas fa-sync-alt"></i> Refresh Data
+                            </button>
                             
                             <button class="btn btn-warning" id="bulkUpdateBtn" onclick="openBulkUpdateModal()" style="display: none;">
                                 <i class="fas fa-edit"></i> Bulk Update (<span id="selectedCount">0</span>)
@@ -895,6 +904,7 @@
         document.addEventListener('DOMContentLoaded', function() {
             loadColumns();
             setupEventListeners();
+            checkEnvironmentInfo();
         });
 
         function setupEventListeners() {
@@ -936,6 +946,14 @@
                 const response = await fetch('/api/columns');
                 columns = await response.json();
                 console.log('Debug: Loaded columns:', columns);
+                
+                // If no columns are found, try to initialize them
+                if (!columns || columns.length === 0) {
+                    console.log('No columns found, initializing defaults...');
+                    await initColumns();
+                    return; // initColumns will call loadColumns again
+                }
+                
                 displayTable();
                 populateFiltersFromColumns(); // Initial population from column config
                 await loadJobs();
@@ -1248,6 +1266,17 @@
             formFields.innerHTML = '';
             
             console.log('Debug: Creating form with columns:', columns);
+
+            // If no columns are configured, show a message
+            if (!columns || columns.length === 0) {
+                formFields.innerHTML = `
+                    <div class="alert alert-warning">
+                        <i class="fas fa-exclamation-triangle"></i>
+                        <strong>No columns configured.</strong> Please add columns first or click "Init Columns" to use defaults.
+                    </div>
+                `;
+                return;
+            }
 
             columns.forEach(column => {
                 const fieldDiv = document.createElement('div');
@@ -1841,6 +1870,88 @@
             } catch (error) {
                 console.error('Error resetting columns:', error);
                 showToast('Failed to reset columns', 'error');
+            }
+        }
+
+        async function initColumns() {
+            try {
+                const response = await fetch('/api/columns/init', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    }
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    await loadColumns();
+                    showToast(result.message, 'success');
+                } else {
+                    showToast(result.error || 'Failed to initialize columns', 'error');
+                }
+            } catch (error) {
+                console.error('Error initializing columns:', error);
+                showToast('Failed to initialize columns', 'error');
+            }
+        }
+
+        async function clearAllData() {
+            if (!confirm('Are you sure you want to clear ALL job data? This action cannot be undone and will remove all jobs permanently.')) {
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/clear-all-data', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    }
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    await loadJobs();
+                    showToast(result.message, 'success');
+                } else {
+                    showToast(result.error || 'Failed to clear data', 'error');
+                }
+            } catch (error) {
+                console.error('Error clearing data:', error);
+                showToast('Failed to clear data', 'error');
+            }
+        }
+
+        async function forceRefreshData() {
+            try {
+                // Clear any cached data
+                jobs = [];
+                displayJobs();
+                
+                // Force reload from server
+                await loadJobs();
+                showToast('Data refreshed from server', 'success');
+            } catch (error) {
+                console.error('Error refreshing data:', error);
+                showToast('Failed to refresh data', 'error');
+            }
+        }
+
+        async function checkEnvironmentInfo() {
+            try {
+                const response = await fetch('/api/environment-info');
+                const info = await response.json();
+                
+                console.log('Environment Info:', info);
+                
+                if (info.is_vercel) {
+                    showToast('Running on Vercel - Data stored in memory', 'warning');
+                }
+                
+                return info;
+            } catch (error) {
+                console.error('Error checking environment:', error);
             }
         }
 
