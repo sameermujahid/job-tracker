@@ -18,6 +18,11 @@ app.config['SECRET_KEY'] = 'your-secret-key-here'
 JOBS_FILE = 'jobs_data.json'
 COLUMNS_FILE = 'columns_config.json'
 
+# Global storage for serverless environment
+_global_jobs = []
+_global_columns = []
+_global_initialized = False
+
 # Email configuration
 EMAIL_CONFIG = {
     'sender_email': 'sameermujahid7777@gmail.com',
@@ -35,64 +40,87 @@ if __name__ == '__main__':
 
 def load_jobs():
     """Load jobs from JSON file"""
-    # Always try to load from file first (this is the persistent source)
+    global _global_jobs, _global_initialized
+    
+    # If we have global data and it's initialized, return it
+    if _global_initialized and _global_jobs:
+        print(f"Returning {len(_global_jobs)} jobs from global storage")
+        return _global_jobs
+    
+    # Try to load from file first
     if os.path.exists(JOBS_FILE):
         try:
             with open(JOBS_FILE, 'r') as f:
                 file_jobs = json.load(f)
+                _global_jobs = file_jobs
+                _global_initialized = True
                 print(f"Loaded {len(file_jobs)} jobs from file")
-                # Always sync with memory storage
-                if not hasattr(app, 'memory_storage'):
-                    app.memory_storage = {'jobs': [], 'columns': []}
-                app.memory_storage['jobs'] = file_jobs
                 return file_jobs
         except Exception as e:
             print(f"Error loading jobs from file: {e}")
     
-    # If file doesn't exist or fails, check memory storage
+    # Check if we have in-memory storage (Vercel environment)
     if hasattr(app, 'memory_storage') and 'jobs' in app.memory_storage:
         memory_jobs = app.memory_storage['jobs']
+        _global_jobs = memory_jobs
+        _global_initialized = True
         print(f"Loaded {len(memory_jobs)} jobs from memory")
         return memory_jobs
     
-    print("No jobs found in file or memory")
+    # Initialize empty
+    _global_jobs = []
+    _global_initialized = True
+    print("Initialized empty jobs list")
     return []
 
 def save_jobs(jobs):
     """Save jobs to JSON file"""
-    print(f"Saving {len(jobs)} jobs...")
+    global _global_jobs, _global_initialized
     
-    # Always update memory storage first
+    # Update global storage
+    _global_jobs = jobs
+    _global_initialized = True
+    
+    # Always update memory storage
     if not hasattr(app, 'memory_storage'):
         app.memory_storage = {'jobs': [], 'columns': []}
     app.memory_storage['jobs'] = jobs
-    print(f"Updated memory storage with {len(jobs)} jobs")
     
     # Try to save to file
     try:
         with open(JOBS_FILE, 'w') as f:
             json.dump(jobs, f, indent=2)
         print(f"Successfully saved {len(jobs)} jobs to file")
-        return True
     except OSError as e:
         if "Read-only file system" in str(e):
             # In Vercel, we can't write to files, so we'll use in-memory storage
             print("Warning: Cannot write to file system in Vercel. Using in-memory storage.")
-            print(f"Stored {len(jobs)} jobs in memory only")
-            return False
+            print(f"Stored {len(jobs)} jobs in memory")
         else:
             print(f"Error saving jobs: {e}")
-            return False
+            # Still keep in memory as fallback
     except Exception as e:
         print(f"Unexpected error saving jobs: {e}")
-        return False
+        # Keep in memory as fallback
+    
+    print(f"Updated global storage with {len(jobs)} jobs")
 
 def load_columns():
     """Load column configuration"""
+    global _global_columns, _global_initialized
+    
+    # If we have global data and it's initialized, return it
+    if _global_initialized and _global_columns:
+        print(f"Returning {len(_global_columns)} columns from global storage")
+        return _global_columns
+    
     # Check if we have in-memory storage (Vercel environment)
     if hasattr(app, 'memory_storage') and 'columns' in app.memory_storage:
         columns = app.memory_storage['columns']
         if columns:  # If we have columns in memory, return them
+            _global_columns = columns
+            _global_initialized = True
+            print(f"Loaded {len(columns)} columns from memory")
             return columns
     
     # Try to load from file
@@ -101,6 +129,9 @@ def load_columns():
             with open(COLUMNS_FILE, 'r') as f:
                 columns = json.load(f)
                 if columns:  # If we successfully loaded columns, return them
+                    _global_columns = columns
+                    _global_initialized = True
+                    print(f"Loaded {len(columns)} columns from file")
                     return columns
         except Exception as e:
             print(f"Error loading columns from file: {e}")
@@ -119,6 +150,9 @@ def load_columns():
             app.memory_storage = {'jobs': [], 'columns': []}
         app.memory_storage['columns'] = default_columns
     
+    _global_columns = default_columns
+    _global_initialized = True
+    print(f"Initialized {len(default_columns)} default columns")
     return default_columns
 
 def get_default_columns():
@@ -188,6 +222,12 @@ def get_default_columns():
 
 def save_columns(columns):
     """Save column configuration"""
+    global _global_columns, _global_initialized
+    
+    # Update global storage
+    _global_columns = columns
+    _global_initialized = True
+    
     try:
         with open(COLUMNS_FILE, 'w') as f:
             json.dump(columns, f, indent=2)
@@ -213,6 +253,8 @@ def save_columns(columns):
         if not hasattr(app, 'memory_storage'):
             app.memory_storage = {'jobs': [], 'columns': []}
         app.memory_storage['columns'] = columns
+    
+    print(f"Updated global storage with {len(columns)} columns")
 
 def send_email(subject, body):
     """Send email using Gmail SMTP"""
@@ -502,7 +544,13 @@ def init_columns():
 @app.route('/api/clear-all-data', methods=['POST'])
 def clear_all_data():
     """Clear all jobs and reset to clean state"""
+    global _global_jobs, _global_columns, _global_initialized
+    
     try:
+        # Clear global storage
+        _global_jobs = []
+        _global_initialized = False
+        
         # Clear memory storage
         if hasattr(app, 'memory_storage'):
             app.memory_storage['jobs'] = []
@@ -524,17 +572,24 @@ def clear_all_data():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-@app.route('/api/sync-data', methods=['POST'])
-def sync_data():
-    """Force sync data from file to memory"""
+@app.route('/api/reset-storage', methods=['POST'])
+def reset_storage():
+    """Reset global storage and force reload from file"""
+    global _global_jobs, _global_columns, _global_initialized
+    
     try:
-        # Force reload from file
+        # Reset global storage
+        _global_jobs = []
+        _global_columns = []
+        _global_initialized = False
+        
+        # Force reload
         jobs = load_jobs()
         columns = load_columns()
         
         return jsonify({
             'success': True, 
-            'message': f'Synced {len(jobs)} jobs and {len(columns)} columns',
+            'message': 'Storage reset successfully',
             'jobs_count': len(jobs),
             'columns_count': len(columns)
         })
@@ -545,8 +600,9 @@ def sync_data():
 def get_jobs():
     """Get all jobs with optional filtering"""
     try:
+        print(f"DEBUG: GET /api/jobs called")
         jobs = load_jobs()
-        print(f"Debug: get_jobs called, found {len(jobs)} jobs")
+        print(f"DEBUG: Loaded {len(jobs)} jobs from storage")
 
         # Apply filters
         search = request.args.get('search', '').lower()
@@ -555,7 +611,7 @@ def get_jobs():
         date_from = request.args.get('date_from', '')
         date_to = request.args.get('date_to', '')
 
-        print(f"Debug: Filters - search: '{search}', status: '{status_filter}', platform: '{platform_filter}'")
+        print(f"DEBUG: Filters - search: '{search}', status: '{status_filter}', platform: '{platform_filter}'")
 
         if search:
             jobs = [job for job in jobs if any(
@@ -576,11 +632,11 @@ def get_jobs():
         if date_to:
             jobs = [job for job in jobs if job.get('application_date', '') <= date_to]
 
-        print(f"Debug: After filtering, returning {len(jobs)} jobs")
+        print(f"DEBUG: Returning {len(jobs)} jobs after filtering")
         return jsonify(jobs)
 
     except Exception as e:
-        print(f"Error in get_jobs: {e}")
+        print(f"DEBUG: Error in get_jobs: {e}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/jobs', methods=['POST'])
@@ -588,10 +644,10 @@ def add_job():
     """Add a new job"""
     try:
         data = request.get_json()
-        print(f"Adding new job with data: {data}")
+        print(f"DEBUG: Received job data: {data}")
         
         columns = load_columns()
-        print(f"Loaded {len(columns)} columns")
+        print(f"DEBUG: Loaded {len(columns)} columns")
 
         # Validate required fields
         required_fields = [col['id'] for col in columns if col.get('required', False)]
@@ -614,22 +670,22 @@ def add_job():
             elif column.get('required', False):
                 new_job[field_id] = ''
 
-        print(f"Created new job: {new_job}")
+        print(f"DEBUG: Created new job: {new_job}")
 
         # Load existing jobs and add new one
         jobs = load_jobs()
-        print(f"Loaded {len(jobs)} existing jobs")
+        print(f"DEBUG: Loaded {len(jobs)} existing jobs")
         
         jobs.append(new_job)
-        print(f"Added new job, total jobs: {len(jobs)}")
+        print(f"DEBUG: Added new job, total jobs: {len(jobs)}")
         
-        save_success = save_jobs(jobs)
-        print(f"Save operation successful: {save_success}")
+        save_jobs(jobs)
+        print(f"DEBUG: Saved jobs successfully")
 
         return jsonify({'success': True, 'job': new_job})
 
     except Exception as e:
-        print(f"Error in add_job: {e}")
+        print(f"DEBUG: Error in add_job: {e}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/jobs/<job_id>', methods=['PUT'])
@@ -1056,30 +1112,13 @@ def get_environment_info():
         jobs_count = len(load_jobs())
         columns_count = len(load_columns())
         
-        # Check file contents
-        file_jobs_count = 0
-        if os.path.exists(JOBS_FILE):
-            try:
-                with open(JOBS_FILE, 'r') as f:
-                    file_jobs = json.load(f)
-                    file_jobs_count = len(file_jobs)
-            except:
-                pass
-        
-        # Check memory contents
-        memory_jobs_count = 0
-        if hasattr(app, 'memory_storage') and 'jobs' in app.memory_storage:
-            memory_jobs_count = len(app.memory_storage['jobs'])
-        
         return jsonify({
             'is_vercel': is_vercel,
             'jobs_count': jobs_count,
             'columns_count': columns_count,
             'memory_storage_available': hasattr(app, 'memory_storage'),
             'jobs_file_exists': os.path.exists(JOBS_FILE),
-            'columns_file_exists': os.path.exists(COLUMNS_FILE),
-            'file_jobs_count': file_jobs_count,
-            'memory_jobs_count': memory_jobs_count
+            'columns_file_exists': os.path.exists(COLUMNS_FILE)
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500

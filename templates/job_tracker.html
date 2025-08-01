@@ -709,11 +709,8 @@
                             <button class="btn btn-outline-secondary" onclick="forceRefreshData()" title="Force refresh data from server">
                                 <i class="fas fa-sync-alt"></i> Refresh Data
                             </button>
-                            <button class="btn btn-outline-primary" onclick="syncData()" title="Sync data from file to memory">
-                                <i class="fas fa-database"></i> Sync Data
-                            </button>
-                            <button class="btn btn-outline-info" onclick="showStorageStatus()" title="Show current storage status">
-                                <i class="fas fa-info-circle"></i> Storage Status
+                            <button class="btn btn-outline-warning" onclick="resetStorage()" title="Reset storage and force reload">
+                                <i class="fas fa-database"></i> Reset Storage
                             </button>
                             
                             <button class="btn btn-warning" id="bulkUpdateBtn" onclick="openBulkUpdateModal()" style="display: none;">
@@ -1944,9 +1941,13 @@
             }
         }
 
-        async function syncData() {
+        async function resetStorage() {
+            if (!confirm('This will reset the storage and force reload all data. Continue?')) {
+                return;
+            }
+
             try {
-                const response = await fetch('/api/sync-data', {
+                const response = await fetch('/api/reset-storage', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -1956,14 +1957,20 @@
                 const result = await response.json();
 
                 if (result.success) {
+                    // Clear local data
+                    jobs = [];
+                    displayJobs();
+                    
+                    // Reload everything
+                    await loadColumns();
                     await loadJobs();
-                    showToast(result.message, 'success');
+                    showToast(`${result.message} - Jobs: ${result.jobs_count}, Columns: ${result.columns_count}`, 'success');
                 } else {
-                    showToast(result.error || 'Failed to sync data', 'error');
+                    showToast(result.error || 'Failed to reset storage', 'error');
                 }
             } catch (error) {
-                console.error('Error syncing data:', error);
-                showToast('Failed to sync data', 'error');
+                console.error('Error resetting storage:', error);
+                showToast('Failed to reset storage', 'error');
             }
         }
 
@@ -1978,36 +1985,9 @@
                     showToast('Running on Vercel - Data stored in memory', 'warning');
                 }
                 
-                // Show detailed storage info
-                const storageInfo = `
-                    File Jobs: ${info.file_jobs_count} | 
-                    Memory Jobs: ${info.memory_jobs_count} | 
-                    Total Jobs: ${info.jobs_count}
-                `;
-                console.log('Storage Info:', storageInfo);
-                
                 return info;
             } catch (error) {
                 console.error('Error checking environment:', error);
-            }
-        }
-
-        async function showStorageStatus() {
-            try {
-                const info = await checkEnvironmentInfo();
-                if (info) {
-                    const message = `
-                        Environment: ${info.is_vercel ? 'Vercel (Serverless)' : 'Local'}
-                        File Jobs: ${info.file_jobs_count}
-                        Memory Jobs: ${info.memory_jobs_count}
-                        Total Jobs: ${info.jobs_count}
-                        Columns: ${info.columns_count}
-                    `;
-                    alert(message);
-                }
-            } catch (error) {
-                console.error('Error showing storage status:', error);
-                showToast('Failed to get storage status', 'error');
             }
         }
 
