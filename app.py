@@ -35,54 +35,57 @@ if __name__ == '__main__':
 
 def load_jobs():
     """Load jobs from JSON file"""
-    # Try to load from file first (this is the source of truth)
+    # Always try to load from file first (this is the persistent source)
     if os.path.exists(JOBS_FILE):
         try:
             with open(JOBS_FILE, 'r') as f:
                 file_jobs = json.load(f)
-                # Sync with memory storage
-                if hasattr(app, 'memory_storage'):
-                    app.memory_storage['jobs'] = file_jobs
+                print(f"Loaded {len(file_jobs)} jobs from file")
+                # Always sync with memory storage
+                if not hasattr(app, 'memory_storage'):
+                    app.memory_storage = {'jobs': [], 'columns': []}
+                app.memory_storage['jobs'] = file_jobs
                 return file_jobs
         except Exception as e:
             print(f"Error loading jobs from file: {e}")
     
-    # Check if we have in-memory storage (Vercel environment)
+    # If file doesn't exist or fails, check memory storage
     if hasattr(app, 'memory_storage') and 'jobs' in app.memory_storage:
         memory_jobs = app.memory_storage['jobs']
-        # Try to sync memory back to file if possible
-        try:
-            with open(JOBS_FILE, 'w') as f:
-                json.dump(memory_jobs, f, indent=2)
-        except Exception as e:
-            print(f"Could not sync memory to file: {e}")
+        print(f"Loaded {len(memory_jobs)} jobs from memory")
         return memory_jobs
     
+    print("No jobs found in file or memory")
     return []
 
 def save_jobs(jobs):
     """Save jobs to JSON file"""
+    print(f"Saving {len(jobs)} jobs...")
+    
     # Always update memory storage first
     if not hasattr(app, 'memory_storage'):
         app.memory_storage = {'jobs': [], 'columns': []}
     app.memory_storage['jobs'] = jobs
+    print(f"Updated memory storage with {len(jobs)} jobs")
     
     # Try to save to file
     try:
         with open(JOBS_FILE, 'w') as f:
             json.dump(jobs, f, indent=2)
         print(f"Successfully saved {len(jobs)} jobs to file")
+        return True
     except OSError as e:
         if "Read-only file system" in str(e):
             # In Vercel, we can't write to files, so we'll use in-memory storage
             print("Warning: Cannot write to file system in Vercel. Using in-memory storage.")
-            print(f"Stored {len(jobs)} jobs in memory")
+            print(f"Stored {len(jobs)} jobs in memory only")
+            return False
         else:
             print(f"Error saving jobs: {e}")
-            # Still keep in memory as fallback
+            return False
     except Exception as e:
         print(f"Unexpected error saving jobs: {e}")
-        # Keep in memory as fallback
+        return False
 
 def load_columns():
     """Load column configuration"""
@@ -521,11 +524,29 @@ def clear_all_data():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/sync-data', methods=['POST'])
+def sync_data():
+    """Force sync data from file to memory"""
+    try:
+        # Force reload from file
+        jobs = load_jobs()
+        columns = load_columns()
+        
+        return jsonify({
+            'success': True, 
+            'message': f'Synced {len(jobs)} jobs and {len(columns)} columns',
+            'jobs_count': len(jobs),
+            'columns_count': len(columns)
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/jobs', methods=['GET'])
 def get_jobs():
     """Get all jobs with optional filtering"""
     try:
         jobs = load_jobs()
+        print(f"Debug: get_jobs called, found {len(jobs)} jobs")
 
         # Apply filters
         search = request.args.get('search', '').lower()
@@ -533,6 +554,8 @@ def get_jobs():
         platform_filter = request.args.get('platform', '')
         date_from = request.args.get('date_from', '')
         date_to = request.args.get('date_to', '')
+
+        print(f"Debug: Filters - search: '{search}', status: '{status_filter}', platform: '{platform_filter}'")
 
         if search:
             jobs = [job for job in jobs if any(
@@ -553,9 +576,11 @@ def get_jobs():
         if date_to:
             jobs = [job for job in jobs if job.get('application_date', '') <= date_to]
 
+        print(f"Debug: After filtering, returning {len(jobs)} jobs")
         return jsonify(jobs)
 
     except Exception as e:
+        print(f"Error in get_jobs: {e}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/jobs', methods=['POST'])
@@ -563,7 +588,10 @@ def add_job():
     """Add a new job"""
     try:
         data = request.get_json()
+        print(f"Adding new job with data: {data}")
+        
         columns = load_columns()
+        print(f"Loaded {len(columns)} columns")
 
         # Validate required fields
         required_fields = [col['id'] for col in columns if col.get('required', False)]
@@ -586,14 +614,22 @@ def add_job():
             elif column.get('required', False):
                 new_job[field_id] = ''
 
+        print(f"Created new job: {new_job}")
+
         # Load existing jobs and add new one
         jobs = load_jobs()
+        print(f"Loaded {len(jobs)} existing jobs")
+        
         jobs.append(new_job)
-        save_jobs(jobs)
+        print(f"Added new job, total jobs: {len(jobs)}")
+        
+        save_success = save_jobs(jobs)
+        print(f"Save operation successful: {save_success}")
 
         return jsonify({'success': True, 'job': new_job})
 
     except Exception as e:
+        print(f"Error in add_job: {e}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/jobs/<job_id>', methods=['PUT'])
@@ -1020,13 +1056,30 @@ def get_environment_info():
         jobs_count = len(load_jobs())
         columns_count = len(load_columns())
         
+        # Check file contents
+        file_jobs_count = 0
+        if os.path.exists(JOBS_FILE):
+            try:
+                with open(JOBS_FILE, 'r') as f:
+                    file_jobs = json.load(f)
+                    file_jobs_count = len(file_jobs)
+            except:
+                pass
+        
+        # Check memory contents
+        memory_jobs_count = 0
+        if hasattr(app, 'memory_storage') and 'jobs' in app.memory_storage:
+            memory_jobs_count = len(app.memory_storage['jobs'])
+        
         return jsonify({
             'is_vercel': is_vercel,
             'jobs_count': jobs_count,
             'columns_count': columns_count,
             'memory_storage_available': hasattr(app, 'memory_storage'),
             'jobs_file_exists': os.path.exists(JOBS_FILE),
-            'columns_file_exists': os.path.exists(COLUMNS_FILE)
+            'columns_file_exists': os.path.exists(COLUMNS_FILE),
+            'file_jobs_count': file_jobs_count,
+            'memory_jobs_count': memory_jobs_count
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
