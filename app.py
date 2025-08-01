@@ -27,9 +27,11 @@ EMAIL_CONFIG = {
     'smtp_port': 587
 }
 
-# Initialize scheduler
-scheduler = BackgroundScheduler()
-scheduler.start()
+# Initialize scheduler (only for local development)
+scheduler = None
+if __name__ == '__main__':
+    scheduler = BackgroundScheduler()
+    scheduler.start()
 
 def load_jobs():
     """Load jobs from JSON file"""
@@ -289,15 +291,6 @@ def send_evening_reminder():
 @app.route('/')
 def index():
     return render_template('job_tracker.html')
-
-@app.route('/health')
-def health_check():
-    """Health check endpoint for Hugging Face Spaces"""
-    return jsonify({
-        'status': 'healthy',
-        'message': 'Job Application Tracker is running',
-        'timestamp': datetime.now().isoformat()
-    })
 
 @app.route('/api/columns', methods=['GET'])
 def get_columns():
@@ -735,6 +728,10 @@ def bulk_delete_jobs():
 # Setup scheduled email reminders
 def setup_email_scheduler():
     """Setup scheduled email reminders"""
+    if scheduler is None:
+        print("Scheduler not available in serverless environment")
+        return
+        
     try:
         # Morning reminder at 11:00 AM
         scheduler.add_job(
@@ -822,8 +819,4 @@ def get_scheduler_status():
 if __name__ == '__main__':
     # Setup email scheduler when app starts
     setup_email_scheduler()
-    
-    # Get port from environment variable (for Hugging Face Spaces)
-    port = int(os.environ.get('PORT', 7860))
-    
-    app.run(debug=False, host='0.0.0.0', port=port) 
+    app.run(debug=True, host='0.0.0.0', port=5000) 
