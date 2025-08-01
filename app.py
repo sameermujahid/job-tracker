@@ -35,6 +35,11 @@ if __name__ == '__main__':
 
 def load_jobs():
     """Load jobs from JSON file"""
+    # Check if we have in-memory storage (Vercel environment)
+    if hasattr(app, 'memory_storage') and 'jobs' in app.memory_storage:
+        return app.memory_storage['jobs']
+    
+    # Try to load from file
     if os.path.exists(JOBS_FILE):
         try:
             with open(JOBS_FILE, 'r') as f:
@@ -45,11 +50,27 @@ def load_jobs():
 
 def save_jobs(jobs):
     """Save jobs to JSON file"""
-    with open(JOBS_FILE, 'w') as f:
-        json.dump(jobs, f, indent=2)
+    try:
+        with open(JOBS_FILE, 'w') as f:
+            json.dump(jobs, f, indent=2)
+    except OSError as e:
+        if "Read-only file system" in str(e):
+            # In Vercel, we can't write to files, so we'll use in-memory storage
+            print("Warning: Cannot write to file system in Vercel. Using in-memory storage.")
+            # Store in memory for this session (will be lost on restart)
+            if not hasattr(app, 'memory_storage'):
+                app.memory_storage = {'jobs': [], 'columns': []}
+            app.memory_storage['jobs'] = jobs
+        else:
+            raise e
 
 def load_columns():
     """Load column configuration"""
+    # Check if we have in-memory storage (Vercel environment)
+    if hasattr(app, 'memory_storage') and 'columns' in app.memory_storage:
+        return app.memory_storage['columns']
+    
+    # Try to load from file
     if os.path.exists(COLUMNS_FILE):
         try:
             with open(COLUMNS_FILE, 'r') as f:
@@ -126,8 +147,19 @@ def load_columns():
 
 def save_columns(columns):
     """Save column configuration"""
-    with open(COLUMNS_FILE, 'w') as f:
-        json.dump(columns, f, indent=2)
+    try:
+        with open(COLUMNS_FILE, 'w') as f:
+            json.dump(columns, f, indent=2)
+    except OSError as e:
+        if "Read-only file system" in str(e):
+            # In Vercel, we can't write to files, so we'll use in-memory storage
+            print("Warning: Cannot write to file system in Vercel. Using in-memory storage.")
+            # Store in memory for this session (will be lost on restart)
+            if not hasattr(app, 'memory_storage'):
+                app.memory_storage = {'jobs': [], 'columns': []}
+            app.memory_storage['columns'] = columns
+        else:
+            raise e
 
 def send_email(subject, body):
     """Send email using Gmail SMTP"""
@@ -798,6 +830,13 @@ def send_manual_email():
 def get_scheduler_status():
     """Get the status of scheduled jobs"""
     try:
+        if scheduler is None:
+            return jsonify({
+                'scheduler_running': False,
+                'jobs': [],
+                'message': 'Scheduler not available in serverless environment'
+            })
+        
         jobs = scheduler.get_jobs()
         job_list = []
         
