@@ -697,6 +697,9 @@
                             <button class="btn btn-outline-primary" onclick="openAddColumnModal()">
                                 <i class="fas fa-plus"></i> Add Column
                             </button>
+                            <button class="btn btn-outline-warning" onclick="resetColumns()" title="Reset to default columns">
+                                <i class="fas fa-undo"></i> Reset Columns
+                            </button>
                             
                             <button class="btn btn-warning" id="bulkUpdateBtn" onclick="openBulkUpdateModal()" style="display: none;">
                                 <i class="fas fa-edit"></i> Bulk Update (<span id="selectedCount">0</span>)
@@ -752,12 +755,6 @@
                         <input type="hidden" id="jobId">
                         <div id="jobFormFields">
                             <!-- Dynamic form fields will be loaded here -->
-                            <div class="text-center">
-                                <div class="spinner-border text-primary" role="status">
-                                    <span class="visually-hidden">Loading form...</span>
-                                </div>
-                                <p class="mt-2">Loading form fields...</p>
-                            </div>
                         </div>
                     </form>
                 </div>
@@ -898,11 +895,6 @@
         document.addEventListener('DOMContentLoaded', function() {
             loadColumns();
             setupEventListeners();
-            
-            // Show Vercel notice if running on Vercel
-            if (window.location.hostname.includes('vercel.app')) {
-                document.getElementById('vercelNotice').style.display = 'block';
-            }
         });
 
         function setupEventListeners() {
@@ -942,18 +934,15 @@
         async function loadColumns() {
             try {
                 const response = await fetch('/api/columns');
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
                 columns = await response.json();
-                console.log('Loaded columns:', columns); // Debug log
+                console.log('Debug: Loaded columns:', columns);
                 displayTable();
                 populateFiltersFromColumns(); // Initial population from column config
                 await loadJobs();
                 loadStats();
             } catch (error) {
                 console.error('Error loading columns:', error);
-                showToast('Error loading columns: ' + error.message, 'error');
+                showToast('Error loading columns', 'error');
             }
         }
 
@@ -1258,12 +1247,7 @@
             const formFields = document.getElementById('jobFormFields');
             formFields.innerHTML = '';
             
-            console.log('Creating job form with columns:', columns); // Debug log
-
-            if (!columns || columns.length === 0) {
-                formFields.innerHTML = '<div class="alert alert-warning">No columns configured. Please add columns first.</div>';
-                return;
-            }
+            console.log('Debug: Creating form with columns:', columns);
 
             columns.forEach(column => {
                 const fieldDiv = document.createElement('div');
@@ -1833,6 +1817,33 @@
             }
         }
 
+        async function resetColumns() {
+            if (!confirm('Are you sure you want to reset all columns to defaults? This will remove any custom columns you have added.')) {
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/columns/reset', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    }
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    await loadColumns();
+                    showToast('Columns reset to defaults successfully!', 'success');
+                } else {
+                    showToast(result.error || 'Failed to reset columns', 'error');
+                }
+            } catch (error) {
+                console.error('Error resetting columns:', error);
+                showToast('Failed to reset columns', 'error');
+            }
+        }
+
         function openAddOptionModal(fieldName) {
             currentField = fieldName;
             document.getElementById('newOption').value = '';
@@ -2164,6 +2175,11 @@
         // Check scheduler status on page load
         document.addEventListener('DOMContentLoaded', function() {
             getSchedulerStatus();
+            
+            // Show Vercel notice if running on Vercel
+            if (window.location.hostname.includes('vercel.app')) {
+                document.getElementById('vercelNotice').style.display = 'block';
+            }
         });
     </script>
 </body>

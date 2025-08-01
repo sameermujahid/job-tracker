@@ -79,7 +79,13 @@ def load_columns():
             pass
 
     # Default columns
-    default_columns = [
+    default_columns = get_default_columns()
+    save_columns(default_columns)
+    return default_columns
+
+def get_default_columns():
+    """Get default column configuration"""
+    return [
         {
             "id": "company",
             "name": "Company Name",
@@ -141,9 +147,6 @@ def load_columns():
             "order": 8
         }
     ]
-
-    save_columns(default_columns)
-    return default_columns
 
 def save_columns(columns):
     """Save column configuration"""
@@ -324,11 +327,25 @@ def send_evening_reminder():
 def index():
     return render_template('job_tracker.html')
 
+@app.route('/favicon.ico')
+def favicon():
+    return '', 204  # No content response
+
 @app.route('/api/columns', methods=['GET'])
 def get_columns():
     """Get column configuration"""
-    columns = load_columns()
-    return jsonify(columns)
+    try:
+        columns = load_columns()
+        print(f"Debug: Loaded {len(columns)} columns")
+        for col in columns:
+            print(f"Debug: Column {col.get('id')} - {col.get('name')}")
+        return jsonify(columns)
+    except Exception as e:
+        print(f"Debug: Error loading columns: {e}")
+        # Return default columns if there's an error
+        default_columns = get_default_columns()
+        save_columns(default_columns)
+        return jsonify(default_columns)
 
 @app.route('/api/columns', methods=['POST'])
 def add_column():
@@ -405,6 +422,16 @@ def delete_column(column_id):
 
         return jsonify({'success': True})
         
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/columns/reset', methods=['POST'])
+def reset_columns():
+    """Reset columns to default configuration"""
+    try:
+        default_columns = get_default_columns()
+        save_columns(default_columns)
+        return jsonify({'success': True, 'message': 'Columns reset to defaults'})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -510,6 +537,13 @@ def delete_job(job_id):
         jobs = load_jobs()
         jobs = [job for job in jobs if job['id'] != job_id]
         save_jobs(jobs)
+        
+        # Ensure columns are preserved even when all jobs are deleted
+        columns = load_columns()
+        if not columns:
+            # If columns were somehow deleted, restore defaults
+            save_columns(get_default_columns())
+        
         return jsonify({'success': True})
 
     except Exception as e:
@@ -748,6 +782,13 @@ def bulk_delete_jobs():
             return jsonify({'error': 'No valid jobs found to delete'}), 404
         
         save_jobs(jobs)
+        
+        # Ensure columns are preserved even when all jobs are deleted
+        columns = load_columns()
+        if not columns:
+            # If columns were somehow deleted, restore defaults
+            save_columns(get_default_columns())
+        
         return jsonify({
             'success': True,
             'message': f'Successfully deleted {deleted_count} jobs',
